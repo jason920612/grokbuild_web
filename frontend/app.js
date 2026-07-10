@@ -43,33 +43,108 @@ const app = {
   active: false,
 };
 
-/* ---------- session picker ---------- */
+/* ---------- theme (dark / light) ---------- */
+const THEME_KEY = "grokweb-theme";
+
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+}
+
+function applyTheme(theme) {
+  const t = theme === "light" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", t);
+  try { localStorage.setItem(THEME_KEY, t); } catch (_) {}
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = t === "light" ? "#fdfdfd" : "#0a0a0a";
+  const btn = $("#theme-toggle");
+  if (btn) {
+    btn.title = t === "light" ? "切換為深色" : "切換為淺色";
+    btn.textContent = t === "light" ? "☾" : "☀";
+  }
+}
+
+function initTheme() {
+  let t = "dark";
+  try { t = localStorage.getItem(THEME_KEY) || "dark"; } catch (_) {}
+  applyTheme(t);
+}
+
+function toggleTheme() {
+  applyTheme(currentTheme() === "dark" ? "light" : "dark");
+}
+
+/* ---------- sidebar / shell ---------- */
+function isMobile() {
+  return window.matchMedia("(max-width: 799px)").matches;
+}
+
+function openSidebar() {
+  $("#sidebar").classList.add("open");
+  $("#sidebar-backdrop").classList.remove("hidden");
+}
+
+function closeSidebar() {
+  $("#sidebar").classList.remove("open");
+  $("#sidebar-backdrop").classList.add("hidden");
+}
+
+function setSidebarCollapsed(collapsed) {
+  document.getElementById("app").classList.toggle("sidebar-collapsed", !!collapsed);
+  try { localStorage.setItem("grokweb-sidebar-collapsed", collapsed ? "1" : "0"); } catch (_) {}
+  const expand = $("#sidebar-expand");
+  if (expand) expand.classList.toggle("hidden", !collapsed || isMobile());
+}
+
+function initSidebarCollapse() {
+  let collapsed = false;
+  try { collapsed = localStorage.getItem("grokweb-sidebar-collapsed") === "1"; } catch (_) {}
+  setSidebarCollapsed(collapsed && !isMobile());
+}
+
+/* ---------- session list (sidebar) ---------- */
 async function loadSessions() {
   const list = $("#session-list");
-  list.innerHTML = '<p class="hint">載入中…</p>';
+  list.innerHTML = '<p class="session-empty">載入中…</p>';
   try {
     const res = await fetch("/api/sessions");
     const sessions = await res.json();
     list.innerHTML = "";
     if (!sessions.length) {
-      list.innerHTML = '<p class="hint">尚無對話。請先在終端機執行 <code>grok</code> 建立一個。</p>';
+      list.innerHTML =
+        '<p class="session-empty">尚無對話。<br>按 New chat，或在終端機執行 <code>grok</code>。</p>';
       return;
     }
     for (const s of sessions) {
+      const title = s.title || "對話";
       const item = el("button", "session-item");
-      item.appendChild(el("div", "s-title", escapeHtml(s.title)));
+      item.type = "button";
+      item.dataset.id = s.id;
+      item.title = title;
+      if (s.id === app.sessionId) item.classList.add("active");
+      const initial = (title.trim()[0] || "·").toUpperCase();
+      item.appendChild(el("span", "s-initial", escapeHtml(initial)));
+      item.appendChild(el("div", "s-title", escapeHtml(title)));
       const meta = el("div", "s-meta");
-      meta.appendChild(el("span", null, escapeHtml((s.cwd || "").split(/[\\/]/).pop() || s.cwd)));
+      meta.appendChild(el("span", null, escapeHtml((s.cwd || "").split(/[\\/]/).pop() || s.cwd || "")));
       if (s.model) meta.appendChild(el("span", null, escapeHtml(s.model)));
       if (s.updated_at) meta.appendChild(el("span", null, s.updated_at.slice(0, 10)));
       meta.appendChild(el("span", null, (s.num_messages || 0) + " 則"));
       item.appendChild(meta);
-      item.onclick = () => openChat(s.id, s.title);
+      item.onclick = () => {
+        openChat(s.id, s.title);
+        if (isMobile()) closeSidebar();
+      };
       list.appendChild(item);
     }
   } catch (e) {
-    list.innerHTML = '<p class="hint">無法載入對話列表。後端有在跑嗎？</p>';
+    list.innerHTML = '<p class="session-empty">無法載入對話列表。後端有在跑嗎？</p>';
   }
+}
+
+function markActiveSession(id) {
+  document.querySelectorAll(".session-item").forEach((n) => {
+    n.classList.toggle("active", n.dataset.id === id);
+  });
 }
 
 /* ---------- new chat ---------- */
@@ -137,6 +212,7 @@ async function createSession() {
     if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
     closeNewChat();
     openChat(j.id, j.title || "新對話");
+    loadSessions();
   } catch (e) {
     $("#nc-error").textContent = String(e.message || e);
   } finally {
@@ -144,10 +220,27 @@ async function createSession() {
   }
 }
 
-/* ---------- view switching ---------- */
-function show(view) {
-  $("#picker").classList.toggle("hidden", view !== "picker");
-  $("#chat").classList.toggle("hidden", view !== "chat");
+/* ---------- view switching (empty vs chat) ---------- */
+function showEmpty() {
+  const main = $("#main");
+  main.classList.add("is-empty");
+  main.classList.remove("is-chat");
+  $("#empty").classList.remove("hidden");
+  $("#chat").classList.add("hidden");
+  $("#close-chat").classList.add("hidden");
+  $("#chat-title").textContent = "Grok";
+  $("#input").placeholder = "Ask anything…";
+}
+
+function showChatShell(title) {
+  const main = $("#main");
+  main.classList.remove("is-empty");
+  main.classList.add("is-chat");
+  $("#empty").classList.add("hidden");
+  $("#chat").classList.remove("hidden");
+  $("#close-chat").classList.remove("hidden");
+  $("#chat-title").textContent = title || "對話";
+  $("#input").placeholder = "傳訊息給 Grok…（輸入 / 看指令）";
 }
 
 function openChat(id, title) {
@@ -159,7 +252,6 @@ function openChat(id, title) {
 
   app.sessionId = id;
   app.reconnectDelay = 1000;
-  $("#chat-title").textContent = title || "對話";
   const messages = $("#messages");
   messages.innerHTML = "";
   app.thread = el("div", "thread");
@@ -169,19 +261,28 @@ function openChat(id, title) {
   app.pendingEchoes = [];
   app.autoScroll = true;
   setActive(false);
-  show("chat");
+  showChatShell(title);
+  markActiveSession(id);
   connect(id);
 }
 
-function backToPicker() {
+function closeChat() {
   app.closing = true;
   clearTimeout(app.reconnectTimer);
   app.reconnectTimer = null;
-  if (app.ws) { app.ws.close(); app.ws = null; }
+  if (app.ws) { try { app.ws.close(); } catch (_) {} app.ws = null; }
+  stopHeartbeat();
   app.sessionId = null;
-  show("picker");
+  app.thread = null;
+  setActive(false);
+  setConn("off");
+  showEmpty();
+  markActiveSession(null);
   loadSessions();
 }
+
+// back-compat alias used nowhere else, but keep name for mental map
+function backToPicker() { closeChat(); }
 
 /* ---------- websocket (heartbeat + auto-reconnect) ---------- */
 const HEARTBEAT_MS = 25000;      // keep the connection warm through proxies/CF tunnel
@@ -771,6 +872,10 @@ function removeQueuedBadge(bubble) {
 
 // kind: "prompt" (send; auto-queues while busy) | "interject" (cancel turn + send now)
 function dispatchPrompt(kind) {
+  if (!app.sessionId) {
+    openNewChat();
+    return;
+  }
   const input = $("#input");
   const text = input.value.trim();
   if (attachmentsBusy()) return; // wait for uploads to finish
@@ -877,12 +982,16 @@ function attachmentsBusy() {
   return attach.items.some((i) => i.uploading);
 }
 
-$("#attach").onclick = () => $("#file-input").click();
+$("#attach").onclick = () => {
+  if (!app.sessionId) { openNewChat(); return; }
+  $("#file-input").click();
+};
 $("#file-input").addEventListener("change", (e) => {
   addFiles(Array.from(e.target.files || []));
   e.target.value = "";
 });
 $("#input").addEventListener("paste", (e) => {
+  if (!app.sessionId) return;
   const files = Array.from(e.clipboardData?.files || []);
   if (files.length) { e.preventDefault(); addFiles(files); }
 });
@@ -893,20 +1002,24 @@ $("#input").addEventListener("paste", (e) => {
   m.addEventListener("drop", (e) => {
     e.preventDefault();
     m.classList.remove("dragover");
+    if (!app.sessionId) return;
     addFiles(Array.from(e.dataTransfer?.files || []));
   });
 }
 
 /* ---------- wiring ---------- */
 $("#refresh").onclick = loadSessions;
-$("#new-chat").onclick = openNewChat;
+$("#new-chat").onclick = () => {
+  openNewChat();
+  if (isMobile()) closeSidebar();
+};
 $("#nc-cancel").onclick = closeNewChat;
 $("#nc-create").onclick = createSession;
 $("#newchat-backdrop").onclick = closeNewChat;
 $("#nc-cwd").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); createSession(); }
 });
-$("#back").onclick = backToPicker;
+$("#close-chat").onclick = closeChat;
 $("#send").onclick = sendPrompt;
 $("#interject").onclick = interjectPrompt;
 $("#stop").onclick = () => send({ type: "cancel" });
@@ -918,4 +1031,26 @@ $("#input").addEventListener("keydown", (e) => {
   }
 });
 
+// shell chrome
+$("#menu-btn").onclick = openSidebar;
+$("#sidebar-close").onclick = closeSidebar;
+$("#sidebar-backdrop").onclick = closeSidebar;
+$("#sidebar-collapse").onclick = () => setSidebarCollapsed(true);
+$("#sidebar-expand").onclick = () => setSidebarCollapsed(false);
+$("#theme-toggle").onclick = toggleTheme;
+window.addEventListener("resize", () => {
+  if (!isMobile()) {
+    closeSidebar();
+    let collapsed = false;
+    try { collapsed = localStorage.getItem("grokweb-sidebar-collapsed") === "1"; } catch (_) {}
+    setSidebarCollapsed(collapsed);
+  } else {
+    document.getElementById("app").classList.remove("sidebar-collapsed");
+    $("#sidebar-expand").classList.add("hidden");
+  }
+});
+
+initTheme();
+initSidebarCollapse();
+showEmpty();
 loadSessions();

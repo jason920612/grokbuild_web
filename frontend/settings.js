@@ -85,6 +85,23 @@ async function openSettings() {
 
   body.innerHTML = "";
 
+  /* --- appearance --- */
+  const ap = section("外觀");
+  const themeRow = row("主題", "與 grok.com 類似的深色 / 淺色");
+  const themeSel = document.createElement("select");
+  for (const [val, label] of [["dark", "Dark"], ["light", "Light"]]) {
+    const o = document.createElement("option");
+    o.value = val; o.textContent = label;
+    if (val === (typeof currentTheme === "function" ? currentTheme() : "dark")) o.selected = true;
+    themeSel.appendChild(o);
+  }
+  themeSel.onchange = () => {
+    if (typeof applyTheme === "function") applyTheme(themeSel.value);
+  };
+  themeRow.appendChild(themeSel);
+  ap.appendChild(themeRow);
+  body.appendChild(ap);
+
   /* --- usage / limits --- */
   const su = section("用量與限制");
   const meta = (status.subscription || {}).meta || {};
@@ -287,5 +304,4 @@ function updateSlashMenu() {
 }
 
 $("#input").addEventListener("input", updateSlashMenu);
-$("#settings-picker").onclick = openSettings;
-$("#settings-chat").onclick = openSettings;
+$("#settings-btn").onclick = openSettings;
