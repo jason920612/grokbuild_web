@@ -72,6 +72,75 @@ async function loadSessions() {
   }
 }
 
+/* ---------- new chat ---------- */
+async function openNewChat() {
+  $("#nc-error").textContent = "";
+  $("#nc-cwd").value = "";
+  $("#newchat").classList.remove("hidden");
+  $("#newchat-backdrop").classList.remove("hidden");
+
+  // recent working directories as quick-pick chips
+  const recent = $("#nc-recent");
+  recent.innerHTML = "";
+  try {
+    const { dirs } = await (await fetch("/api/recent-dirs")).json();
+    if (dirs && dirs.length) $("#nc-cwd").value = dirs[0];
+    for (const d of (dirs || []).slice(0, 8)) {
+      const chip = el("button", "chip", escapeHtml(d.split(/[\\/]/).pop() || d));
+      chip.title = d;
+      chip.onclick = () => { $("#nc-cwd").value = d; };
+      recent.appendChild(chip);
+    }
+  } catch (_) {}
+
+  // model options from global status (agent model catalog)
+  const sel = $("#nc-model");
+  sel.innerHTML = "";
+  try {
+    const status = await (await fetch("/api/status")).json();
+    const ms = status.agent?.modelState;
+    for (const m of ms?.availableModels || []) {
+      const o = document.createElement("option");
+      o.value = m.modelId; o.textContent = m.name || m.modelId;
+      if (m.modelId === ms.currentModelId) o.selected = true;
+      sel.appendChild(o);
+    }
+  } catch (_) {}
+  if (!sel.options.length) {
+    const o = document.createElement("option");
+    o.value = ""; o.textContent = "預設模型";
+    sel.appendChild(o);
+  }
+}
+
+function closeNewChat() {
+  $("#newchat").classList.add("hidden");
+  $("#newchat-backdrop").classList.add("hidden");
+}
+
+async function createSession() {
+  const cwd = $("#nc-cwd").value.trim();
+  const model = $("#nc-model").value || undefined;
+  if (!cwd) { $("#nc-error").textContent = "請輸入工作目錄"; return; }
+  const btn = $("#nc-create");
+  btn.disabled = true; btn.textContent = "建立中…";
+  $("#nc-error").textContent = "";
+  try {
+    const res = await fetch("/api/sessions/new", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd, model }),
+    });
+    const j = await res.json();
+    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+    closeNewChat();
+    openChat(j.id, j.title || "新對話");
+  } catch (e) {
+    $("#nc-error").textContent = String(e.message || e);
+  } finally {
+    btn.disabled = false; btn.textContent = "建立並開始";
+  }
+}
+
 /* ---------- view switching ---------- */
 function show(view) {
   $("#picker").classList.toggle("hidden", view !== "picker");
@@ -745,6 +814,13 @@ $("#input").addEventListener("paste", (e) => {
 
 /* ---------- wiring ---------- */
 $("#refresh").onclick = loadSessions;
+$("#new-chat").onclick = openNewChat;
+$("#nc-cancel").onclick = closeNewChat;
+$("#nc-create").onclick = createSession;
+$("#newchat-backdrop").onclick = closeNewChat;
+$("#nc-cwd").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); createSession(); }
+});
 $("#back").onclick = backToPicker;
 $("#send").onclick = sendPrompt;
 $("#stop").onclick = () => send({ type: "cancel" });

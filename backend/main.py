@@ -51,6 +51,32 @@ async def api_sessions() -> JSONResponse:
     return JSONResponse(session_store.list_sessions())
 
 
+@app.get("/api/recent-dirs")
+async def api_recent_dirs() -> JSONResponse:
+    """Distinct working directories from existing sessions, most recent first."""
+    seen: list[str] = []
+    for s in session_store.list_sessions():
+        cwd = s.get("cwd")
+        if cwd and cwd not in seen:
+            seen.append(cwd)
+    return JSONResponse({"dirs": seen[:20]})
+
+
+@app.post("/api/sessions/new")
+async def api_new_session(request: Request) -> JSONResponse:
+    body = await request.json()
+    cwd = (body.get("cwd") or "").strip()
+    if not cwd or not Path(cwd).is_dir():
+        return JSONResponse({"error": "工作目錄不存在或無效"}, status_code=400)
+    try:
+        bridge = await manager.create(cwd, body.get("model"))
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc)}, status_code=502)
+    return JSONResponse(
+        {"id": bridge.session_id, "cwd": cwd, "title": Path(cwd).name or cwd, "state": bridge.state()}
+    )
+
+
 @app.get("/api/sessions/{session_id}")
 async def api_session(session_id: str) -> JSONResponse:
     meta = session_store.get_session_meta(session_id)

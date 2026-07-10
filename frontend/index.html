@@ -14,6 +14,7 @@
   <section id="picker" class="view">
     <header class="topbar">
       <div class="brand">Grok<span>Web</span></div>
+      <button id="new-chat" class="ghost" title="開新對話">＋</button>
       <button id="settings-picker" class="ghost" title="設定與用量">⚙</button>
       <button id="refresh" class="ghost" title="重新整理">↻</button>
     </header>
@@ -38,6 +39,22 @@
       <textarea id="input" rows="1" placeholder="傳訊息給 Grok…（輸入 / 看指令）" autocomplete="off"></textarea>
       <button id="send" class="send" title="送出">↑</button>
       <button id="stop" class="stop hidden" title="停止">■</button>
+    </div>
+  </section>
+
+  <!-- New chat dialog -->
+  <div id="newchat-backdrop" class="sheet-backdrop hidden"></div>
+  <section id="newchat" class="modal hidden">
+    <h3>開新對話</h3>
+    <label class="modal-label">工作目錄（session 綁定的資料夾）</label>
+    <input id="nc-cwd" class="modal-input" type="text" placeholder="C:\Users\...\your-project" autocomplete="off" />
+    <div id="nc-recent" class="chip-wrap"></div>
+    <label class="modal-label">模型</label>
+    <select id="nc-model" class="modal-input"></select>
+    <div id="nc-error" class="modal-error"></div>
+    <div class="modal-actions">
+      <button id="nc-cancel" class="chip">取消</button>
+      <button id="nc-create" class="primary-btn">建立並開始</button>
     </div>
   </section>
 

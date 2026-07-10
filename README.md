@@ -13,6 +13,7 @@
 ## 功能
 
 - grok.com 風格聊天介面，手機優先 RWD，串流回覆 / 思考 / 工具卡片 / 計畫
+- 在網頁直接**開新對話**（選工作目錄與模型），也可續接終端機建立的 session
 - 終端機 TUI 與網頁**同時即時鏡像**同一個 session（透過 leader）
 - 選項/權限彈窗雙向同步，網頁上以按鈕作答
 - 圖片與檔案上傳（＋ / 拖放 / 貼上），對話中內嵌顯示圖片、摺疊顯示文字檔
@@ -103,6 +104,8 @@ python launcher.py --tunnel     # 非同內網也能連
 | 方法 | 路徑 | 說明 |
 | --- | --- | --- |
 | GET | `/api/sessions` | 列出所有 session |
+| POST | `/api/sessions/new` | `{cwd, model?}` 建立新 session（在網頁開新對話） |
+| GET | `/api/recent-dirs` | 最近用過的工作目錄（開新對話快選） |
 | GET | `/api/sessions/{id}` | 單一 session 資訊 |
 | GET | `/api/sessions/{id}/history` | 正規化歷史對話項目 |
 | GET | `/api/status` | 訂閱方案、billing 用量、agent 版本、活 session 列表 |

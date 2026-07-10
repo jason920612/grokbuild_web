@@ -87,14 +87,23 @@ class AcpBridge:
                 "clientInfo": {"name": "grokweb", "version": "0.1.0"},
             },
         )
-        # Load the existing session. Updates replayed during load are treated as
-        # history (the browser already renders history from updates.jsonl) and
-        # dropped until the load response resolves.
-        load = await self._request(
-            "session/load",
-            {"sessionId": self.session_id, "cwd": self.cwd, "mcpServers": []},
-        )
-        self._capture_state(load or {})
+        if self.session_id:
+            # Load an existing session. Updates replayed during load are treated
+            # as history (rendered from updates.jsonl) and dropped until the load
+            # response resolves.
+            result = await self._request(
+                "session/load",
+                {"sessionId": self.session_id, "cwd": self.cwd, "mcpServers": []},
+            )
+        else:
+            # Create a brand-new session in the given working directory.
+            result = await self._request(
+                "session/new", {"cwd": self.cwd, "mcpServers": []}
+            )
+            self.session_id = (result or {}).get("sessionId")
+            if not self.session_id:
+                raise RuntimeError("session/new returned no sessionId")
+        self._capture_state(result or {})
         self._ready.set()
 
     def _capture_state(self, result: dict[str, Any]) -> None:

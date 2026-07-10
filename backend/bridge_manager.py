@@ -34,6 +34,18 @@ class BridgeManager:
             self._bridges[session_id] = bridge
             return bridge
 
+    async def create(self, cwd: str, model: Optional[str] = None) -> AcpBridge:
+        """Create a brand-new session in ``cwd`` and register its live bridge."""
+        bridge = AcpBridge("", cwd)  # empty id -> start() calls session/new
+        await bridge.start()
+        self._bridges[bridge.session_id] = bridge
+        if model:
+            try:
+                await bridge.set_model(model)
+            except Exception:  # noqa: BLE001 - keep the session; model optional
+                pass
+        return bridge
+
     async def shutdown(self) -> None:
         for bridge in list(self._bridges.values()):
             await bridge.stop()
