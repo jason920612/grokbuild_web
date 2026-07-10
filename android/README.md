@@ -4,10 +4,11 @@
 
 ## 功能
 
-- 首次開啟輸入 grokweb 網址（含 `?key=` token），之後記憶並全螢幕載入
+- **掃描 QR code 自動填網址**（原生 CameraX + ML Kit 離線辨識），或手動貼上網址（含 `?key=` token）；之後記憶並全螢幕載入
+- **網址/token 失效自動提示重掃**：主頁載入失敗或回 403 時彈出對話框（重新掃描 QR / 重試 / 手動輸入）——tunnel 重開後網址與 token 會變，這時直接重掃即可
 - 檔案 / 圖片上傳（`<input type=file>` → 系統選擇器，支援多選）
 - 檔案下載（`/api/.../file` 下載 → 系統 DownloadManager）
-- 硬體返回鍵：先走網頁歷史，到頂後跳選單（重新載入 / 更改網址 / 離開）
+- 硬體返回鍵：先走網頁歷史，到頂後跳選單（重新載入 / 重新掃描 QR / 更改網址 / 離開）
 - Cookie 持久化（token cookie），DOM storage、深色沉浸
 - 支援 http（區網）與 https（Cloudflare tunnel）
 
@@ -30,6 +31,8 @@ $env:JAVA_HOME="<jdk17 路徑>"
 
 ## 規格
 
-- package `com.grokweb.app`，minSdk 26（Android 8.0）、targetSdk 34
-- AGP 8.6.1、Gradle 8.9、Java 17
-- 單一 `MainActivity`，UI 以程式建立（無 layout XML）
+- package `com.grokweb.app`，minSdk 26（Android 8.0）、targetSdk 34，APK ~13MB
+- AGP 8.6.1、Gradle 8.9、Java 17、AndroidX
+- `MainActivity`（WebView 外殼）+ `ScanActivity`（CameraX + ML Kit QR），UI 以程式建立（無 layout XML）
+- 依賴：androidx.camera:1.3.4、com.google.mlkit:barcode-scanning:17.3.0（離線 bundled）
+- 只打包 arm64-v8a / armeabi-v7a（真實手機；不含 x86 模擬器）

@@ -7,7 +7,6 @@ import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -19,7 +18,9 @@ import android.webkit.CookieManager;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -30,13 +31,18 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.ComponentActivity;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+
 /**
- * A thin WebView shell around the grokweb frontend. On first launch the user
- * pastes their grokweb URL (with the {@code ?key=} token); it is remembered and
- * loaded full-screen thereafter. Handles file uploads, downloads, the hardware
- * back button (in-page history, then a menu), and changing the URL.
+ * A thin WebView shell around the grokweb frontend. First launch takes the
+ * grokweb URL — pasted or scanned from a QR code (with the {@code ?key=} token)
+ * — remembers it, and loads full-screen thereafter. Handles file uploads,
+ * downloads, the hardware back button, and prompts a re-scan when the saved URL
+ * stops working (tunnel restarted -> the URL and token change).
  */
-public class MainActivity extends Activity {
+public class MainActivity extends ComponentActivity {
 
     private static final String PREFS = "grokweb";
     private static final String KEY_URL = "url";
@@ -49,6 +55,15 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private ValueCallback<Uri[]> filePathCallback;
+    private boolean errorShown = false;
+
+    private final ActivityResultLauncher<Intent> scanLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), res -> {
+                if (res.getResultCode() == Activity.RESULT_OK && res.getData() != null) {
+                    String url = res.getData().getStringExtra("url");
+                    if (url != null && !url.trim().isEmpty()) onScanned(url);
+                }
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -63,6 +78,17 @@ public class MainActivity extends Activity {
 
     private SharedPreferences prefs() {
         return getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private void launchScan() {
+        scanLauncher.launch(new Intent(this, ScanActivity.class));
+    }
+
+    private void onScanned(String raw) {
+        String u = raw.trim();
+        if (!u.startsWith("http://") && !u.startsWith("https://")) u = "https://" + u;
+        prefs().edit().putString(KEY_URL, u).apply();
+        showWeb(u);
     }
 
     // ---------- setup screen ----------
@@ -82,12 +108,25 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView sub = new TextView(this);
-        sub.setText("貼上 grokweb 網址（含 ?key= token）");
+        sub.setText("掃描 QR，或貼上網址（含 ?key= token）");
         sub.setTextColor(DIM);
         sub.setTextSize(14);
         sub.setGravity(Gravity.CENTER);
         sub.setPadding(0, dp(8), 0, dp(28));
         root.addView(sub);
+
+        Button scan = new Button(this);
+        scan.setText("掃描 QR code");
+        scan.setOnClickListener(v -> launchScan());
+        root.addView(scan, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView or = new TextView(this);
+        or.setText("— 或 —");
+        or.setTextColor(HINT);
+        or.setGravity(Gravity.CENTER);
+        or.setPadding(0, dp(14), 0, dp(14));
+        root.addView(or);
 
         final EditText input = new EditText(this);
         input.setHint("https://xxxx.trycloudflare.com/?key=...");
@@ -103,14 +142,12 @@ public class MainActivity extends Activity {
         go.setText("連線");
         go.setOnClickListener(v -> {
             String u = input.getText().toString().trim();
-            if (u.isEmpty()) { toast("請輸入網址"); return; }
-            if (!u.startsWith("http://") && !u.startsWith("https://")) u = "https://" + u;
-            prefs().edit().putString(KEY_URL, u).apply();
-            showWeb(u);
+            if (u.isEmpty()) { toast("請輸入或掃描網址"); return; }
+            onScanned(u);
         });
         LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        glp.topMargin = dp(20);
+        glp.topMargin = dp(16);
         root.addView(go, glp);
 
         setContentView(root);
@@ -119,6 +156,7 @@ public class MainActivity extends Activity {
     // ---------- web screen ----------
     @SuppressLint("SetJavaScriptEnabled")
     private void showWeb(String url) {
+        errorShown = false;
         web = new WebView(this);
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(BG);
@@ -142,6 +180,26 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 return false; // keep navigation inside the app
+            }
+
+            @Override
+            public void onPageStarted(WebView view, String u, android.graphics.Bitmap favicon) {
+                errorShown = false;
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError err) {
+                if (req.isForMainFrame()) {
+                    showExpired("無法連線到伺服器（網址可能已失效）");
+                }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest req,
+                                            WebResourceResponse resp) {
+                if (req.isForMainFrame() && resp.getStatusCode() == 403) {
+                    showExpired("存取被拒（token 已失效）");
+                }
             }
         });
 
@@ -183,6 +241,19 @@ public class MainActivity extends Activity {
         web.loadUrl(url);
     }
 
+    private void showExpired(String msg) {
+        if (errorShown || isFinishing()) return;
+        errorShown = true;
+        new AlertDialog.Builder(this)
+                .setTitle("連線問題")
+                .setMessage(msg + "\n\n伺服器重開後網址與 token 會改變，請重新掃描 QR code。")
+                .setCancelable(false)
+                .setPositiveButton("重新掃描 QR", (d, w) -> launchScan())
+                .setNeutralButton("重試", (d, w) -> { if (web != null) web.reload(); })
+                .setNegativeButton("手動輸入", (d, w) -> showSetup(prefs().getString(KEY_URL, "")))
+                .show();
+    }
+
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         if (req == FILE_CHOOSER_REQ) {
@@ -215,11 +286,13 @@ public class MainActivity extends Activity {
             }
             new AlertDialog.Builder(this)
                     .setTitle("GrokWeb")
-                    .setItems(new CharSequence[]{"重新載入", "更改網址", "離開"}, (d, which) -> {
-                        if (which == 0) web.reload();
-                        else if (which == 1) showSetup(prefs().getString(KEY_URL, ""));
-                        else finish();
-                    })
+                    .setItems(new CharSequence[]{"重新載入", "重新掃描 QR", "更改網址", "離開"},
+                            (d, which) -> {
+                                if (which == 0) web.reload();
+                                else if (which == 1) launchScan();
+                                else if (which == 2) showSetup(prefs().getString(KEY_URL, ""));
+                                else finish();
+                            })
                     .show();
             return true;
         }
