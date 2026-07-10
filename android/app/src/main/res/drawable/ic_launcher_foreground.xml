@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 4-point sparkle (grok mark), within the center safe zone -->
+    <path
+        android:fillColor="#F5F5F5"
+        android:pathData="M54,30 C56.5,47 61,51.5 78,54 C61,56.5 56.5,61 54,78 C51.5,61 47,56.5 30,54 C47,51.5 51.5,47 54,30 Z" />
+</vector>

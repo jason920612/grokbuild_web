@@ -16,3 +16,4 @@ bin/cloudflared*
 Thumbs.db
 .idea/
 .vscode/
+GrokWeb.apk
