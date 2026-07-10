@@ -79,16 +79,19 @@ async function openNewChat() {
   $("#newchat").classList.remove("hidden");
   $("#newchat-backdrop").classList.remove("hidden");
 
-  // recent working directories as quick-pick chips
+  // default to the system temp dir; recent dirs are offered as quick-pick chips
   const recent = $("#nc-recent");
   recent.innerHTML = "";
   try {
-    const { dirs } = await (await fetch("/api/recent-dirs")).json();
-    if (dirs && dirs.length) $("#nc-cwd").value = dirs[0];
-    for (const d of (dirs || []).slice(0, 8)) {
-      const chip = el("button", "chip", escapeHtml(d.split(/[\\/]/).pop() || d));
-      chip.title = d;
-      chip.onclick = () => { $("#nc-cwd").value = d; };
+    const { dirs, default: tmp } = await (await fetch("/api/recent-dirs")).json();
+    $("#nc-cwd").value = tmp || (dirs && dirs[0]) || "";
+    const picks = [];
+    if (tmp) picks.push({ d: tmp, label: "暫存目錄" });
+    for (const d of (dirs || []).slice(0, 8)) picks.push({ d, label: d.split(/[\\/]/).pop() || d });
+    for (const p of picks) {
+      const chip = el("button", "chip", escapeHtml(p.label));
+      chip.title = p.d;
+      chip.onclick = () => { $("#nc-cwd").value = p.d; };
       recent.appendChild(chip);
     }
   } catch (_) {}

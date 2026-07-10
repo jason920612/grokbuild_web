@@ -27,6 +27,7 @@ import contextlib
 
 import mimetypes
 import re
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
@@ -53,13 +54,14 @@ async def api_sessions() -> JSONResponse:
 
 @app.get("/api/recent-dirs")
 async def api_recent_dirs() -> JSONResponse:
-    """Distinct working directories from existing sessions, most recent first."""
+    """Distinct working directories from existing sessions, most recent first,
+    plus the default for new chats (the system temp dir)."""
     seen: list[str] = []
     for s in session_store.list_sessions():
         cwd = s.get("cwd")
         if cwd and cwd not in seen:
             seen.append(cwd)
-    return JSONResponse({"dirs": seen[:20]})
+    return JSONResponse({"dirs": seen[:20], "default": str(Path(tempfile.gettempdir()))})
 
 
 @app.post("/api/sessions/new")
