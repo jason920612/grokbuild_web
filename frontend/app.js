@@ -167,6 +167,7 @@ function openChat(id, title) {
   app.refs = { assistant: null, thought: null, tools: new Map(), plan: null };
   app.userSeg = null;
   app.pendingEchoes = [];
+  app.autoScroll = true;
   setActive(false);
   show("chat");
   connect(id);
@@ -270,10 +271,12 @@ function resetThread() {
 function handle(msg) {
   switch (msg.type) {
     case "history":
-      // full transcript — rebuild so this is idempotent on reconnect
+      // full transcript — rebuild so this is idempotent on reconnect.
+      // Non-forced scroll: first open follows (autoScroll=true); a silent
+      // reconnect while the user reads scrolled-up leaves them in place.
       resetThread();
       for (const item of msg.items) renderHistoryItem(item);
-      scrollToBottom(true);
+      scrollToBottom();
       break;
     case "session_update":
       onUpdate(msg.update);
@@ -566,16 +569,44 @@ function renderPlan(entries) {
 /* ---------- ask_user_question (option picker) ---------- */
 const interactions = new Map(); // requestId -> card element
 
+function collapseCard(card, summary) {
+  // fold the card into a one-line summary; click to expand/collapse the record
+  if (card.dataset.hasHead) {
+    card.querySelector(".pc-summary").textContent = summary;
+    card.classList.add("collapsed");
+    return;
+  }
+  card.dataset.hasHead = "1";
+  const head = el("div", "perm-collapsed-head");
+  const arrow = el("span", "pc-arrow", "▸");
+  head.appendChild(arrow);
+  head.appendChild(el("span", "pc-summary", escapeHtml(summary)));
+  head.onclick = () => {
+    const collapsed = card.classList.toggle("collapsed");
+    arrow.textContent = collapsed ? "▸" : "▾";
+  };
+  card.prepend(head);
+  card.classList.add("collapsed");
+}
+
+function summarizeAnswers(answers) {
+  const parts = [];
+  for (const k of Object.keys(answers || {})) {
+    const v = answers[k];
+    parts.push(Array.isArray(v) ? v.join("、") : v);
+  }
+  const s = parts.join("；");
+  return s.length > 60 ? s.slice(0, 60) + "…" : s;
+}
+
 function resolveInteraction(requestId) {
   const card = interactions.get(requestId);
   if (!card) return;
   interactions.delete(requestId);
   if (!card.dataset.answered) {
     card.querySelectorAll("button, input, textarea").forEach((x) => (x.disabled = true));
-    const note = el("div", "q-note", "已在其他裝置回答");
-    card.appendChild(note);
+    collapseCard(card, "已在其他裝置回答");
   }
-  setTimeout(() => card.classList.add("dim"), 50);
 }
 
 function renderQuestions(msg) {
@@ -650,6 +681,7 @@ function renderQuestions(msg) {
     card.querySelectorAll("button, input").forEach((x) => (x.disabled = true));
     interactions.delete(msg.requestId);
     send(payload);
+    collapseCard(card, payload.skipped ? "已跳過提問" : "已回答：" + summarizeAnswers(payload.answers));
   }
   function maybeAutoSubmit(force) {
     // Single question, single-select: answer immediately on tap.
@@ -665,7 +697,7 @@ function renderQuestions(msg) {
   skip.onclick = () => finish({ type: "question_response", requestId: msg.requestId, skipped: true });
 
   app.thread.appendChild(card);
-  scrollToBottom(true);
+  scrollToBottom(); // don't yank the view down if the user is reading above
 }
 
 function renderPermission(msg) {
@@ -685,20 +717,37 @@ function renderPermission(msg) {
       opts.querySelectorAll("button").forEach((x) => (x.disabled = true));
       b.textContent = "✓ " + b.textContent;
       send({ type: "permission_response", requestId: msg.requestId, optionId: o.optionId });
+      collapseCard(card, "已回應：" + (o.name || o.optionId));
     };
     opts.appendChild(b);
   }
   card.appendChild(opts);
   app.thread.appendChild(card);
-  scrollToBottom(true);
+  scrollToBottom(); // don't yank the view down if the user is reading above
 }
 
-/* ---------- scroll ---------- */
+/* ---------- scroll ----------
+   Follow the stream only while the user is at the bottom. The moment they
+   scroll up we stop following entirely (no fighting); scrolling back to the
+   bottom re-enables following. Programmatic scrolls are flagged so they don't
+   count as user intent. */
+app.autoScroll = true;
+let _progScroll = false;
+
 function scrollToBottom(force) {
+  if (!force && !app.autoScroll) return;
   const m = $("#messages");
-  const near = m.scrollHeight - m.scrollTop - m.clientHeight < 160;
-  if (force || near) m.scrollTop = m.scrollHeight;
+  _progScroll = true;
+  m.scrollTop = m.scrollHeight;
+  requestAnimationFrame(() => { _progScroll = false; });
+  if (force) app.autoScroll = true;
 }
+
+$("#messages").addEventListener("scroll", () => {
+  if (_progScroll) return;
+  const m = $("#messages");
+  app.autoScroll = m.scrollHeight - m.scrollTop - m.clientHeight < 40;
+});
 
 /* ---------- composer ---------- */
 function send(obj) {
