@@ -4,9 +4,13 @@
 
 > ⚠️ 非官方專案，與 xAI 無任何關聯。這是社群為 Grok CLI 打造的第三方網頁客戶端，透過 CLI 公開的 ACP（Agent Client Protocol）介面運作。使用前你需要自行安裝並登入 Grok CLI。
 
+## 相容性
+
+已對 **Grok CLI 0.2.95** 完整驗證：所依賴的 ACP 介面（`initialize` / `session/new` / `session/load` / `session/prompt`、`session/update` 事件、`session/set_model`、`session/set_mode`、`_x.ai/auth/check_subscription`、`_x.ai/billing`、`_x.ai/sessions/list`、`_x.ai/session/info`、`_x.ai/commands/list`、`_x.ai/ask_user_question`、`session/request_permission`、圖片 image block）皆與 0.2.93 相同、無破壞性變更。
+
 ## 需求
 
-- 已安裝並登入的 **Grok CLI**（`grok`，本專案針對 v0.2.93 開發），預設在 `~/.grok/bin/`
+- 已安裝並登入的 **Grok CLI**（`grok`，已對 **v0.2.95** 驗證，v0.2.93 起的 ACP 介面相容），預設在 `~/.grok/bin/`
 - **Python 3.11+**
 - 選用：`cloudflared`（外網存取，`--tunnel` 會自動下載）
 
