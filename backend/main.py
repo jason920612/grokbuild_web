@@ -14,6 +14,7 @@ Server -> browser:
     {"type": "error", "message"}
     {"type": "agent_exit"}
 Browser -> server:
+    {"type": "ping"}                                     heartbeat (server replies {"type":"pong"})
     {"type": "prompt", "text": "...", "attachments": [{path,name,mime,isImage}]?}
     {"type": "permission_response", "requestId", "optionId"|null, "cancelled"?}
     {"type": "question_response", "requestId", "answers": {<question>: <label|[labels]>}, "skipped"?}
@@ -256,7 +257,9 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
         while True:
             data = await ws.receive_json()
             kind = data.get("type")
-            if kind == "prompt":
+            if kind == "ping":
+                await ws.send_json({"type": "pong"})
+            elif kind == "prompt":
                 text = (data.get("text") or "").strip()
                 attachments = data.get("attachments") or []
                 if text or attachments:

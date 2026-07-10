@@ -79,7 +79,14 @@ function show(view) {
 }
 
 function openChat(id, title) {
+  app.closing = true;
+  clearTimeout(app.reconnectTimer);
+  app.reconnectTimer = null;
+  if (app.ws) { try { app.ws.close(); } catch (_) {} app.ws = null; }
+  stopHeartbeat();
+
   app.sessionId = id;
+  app.reconnectDelay = 1000;
   $("#chat-title").textContent = title || "對話";
   const messages = $("#messages");
   messages.innerHTML = "";
@@ -94,21 +101,39 @@ function openChat(id, title) {
 }
 
 function backToPicker() {
+  app.closing = true;
+  clearTimeout(app.reconnectTimer);
+  app.reconnectTimer = null;
   if (app.ws) { app.ws.close(); app.ws = null; }
   app.sessionId = null;
   show("picker");
   loadSessions();
 }
 
-/* ---------- websocket ---------- */
+/* ---------- websocket (heartbeat + auto-reconnect) ---------- */
+const HEARTBEAT_MS = 25000;      // keep the connection warm through proxies/CF tunnel
+const RECONNECT_MAX_MS = 15000;
+
 function connect(id) {
+  app.closing = false;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws/${id}`);
   app.ws = ws;
-  setConn(false);
-  ws.onopen = () => setConn(true);
-  ws.onclose = () => { setConn(false); setActive(false); };
-  ws.onerror = () => setConn(false);
+  setConn("connecting");
+
+  ws.onopen = () => {
+    setConn("on");
+    app.reconnectDelay = 1000;
+    startHeartbeat();
+  };
+  ws.onclose = () => {
+    stopHeartbeat();
+    setActive(false);
+    if (app.closing || app.sessionId !== id) return;
+    setConn("off");
+    scheduleReconnect(id);
+  };
+  ws.onerror = () => {};
   ws.onmessage = (ev) => {
     let msg;
     try { msg = JSON.parse(ev.data); } catch (_) { return; }
@@ -116,15 +141,65 @@ function connect(id) {
   };
 }
 
-function setConn(on) {
+function scheduleReconnect(id) {
+  if (app.reconnectTimer || app.closing) return;
+  const delay = app.reconnectDelay || 1000;
+  setConn("reconnecting");
+  app.reconnectTimer = setTimeout(() => {
+    app.reconnectTimer = null;
+    if (!app.closing && app.sessionId === id) connect(id);
+  }, delay);
+  app.reconnectDelay = Math.min(delay * 2, RECONNECT_MAX_MS);
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  app.hb = setInterval(() => {
+    if (app.ws && app.ws.readyState === WebSocket.OPEN) {
+      try { app.ws.send(JSON.stringify({ type: "ping" })); } catch (_) {}
+    }
+  }, HEARTBEAT_MS);
+}
+function stopHeartbeat() { if (app.hb) { clearInterval(app.hb); app.hb = null; } }
+
+// Phones freeze timers on backgrounded tabs, so the socket silently dies while
+// away. Reconnect the instant the tab is shown again or the network returns.
+function ensureConnected() {
+  if (!app.sessionId || app.closing) return;
+  const st = app.ws && app.ws.readyState;
+  if (st === WebSocket.OPEN || st === WebSocket.CONNECTING) return;
+  clearTimeout(app.reconnectTimer);
+  app.reconnectTimer = null;
+  app.reconnectDelay = 1000;
+  connect(app.sessionId);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") ensureConnected();
+});
+window.addEventListener("online", ensureConnected);
+window.addEventListener("focus", ensureConnected);
+
+function setConn(state) {
   const c = $("#conn");
-  c.classList.toggle("on", on);
-  c.classList.toggle("off", !on);
+  c.classList.toggle("on", state === "on");
+  c.classList.toggle("off", state === "off");
+  c.classList.toggle("reconnecting", state === "reconnecting" || state === "connecting");
+  c.title = { on: "已連線", off: "已斷線", reconnecting: "重新連線中…", connecting: "連線中…" }[state] || "";
+}
+
+function resetThread() {
+  app.thread.innerHTML = "";
+  app.refs = { assistant: null, thought: null, tools: new Map(), plan: null };
+  app.userSeg = null;
+  app.pendingEcho = null;
+  interactions.clear();
 }
 
 function handle(msg) {
   switch (msg.type) {
     case "history":
+      // full transcript — rebuild so this is idempotent on reconnect
+      resetThread();
       for (const item of msg.items) renderHistoryItem(item);
       scrollToBottom(true);
       break;
