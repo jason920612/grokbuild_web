@@ -51,6 +51,8 @@ class AcpBridge:
         self.session_config: dict[str, Any] = {}  # x.ai/sessionConfig (selected flags)
         self.current_model: Optional[str] = None
         self.current_mode: Optional[str] = None
+        # latest queue state (prompts waiting behind the running turn)
+        self.queue: dict[str, Any] = {"entries": [], "runningPromptId": None}
         self._lock = asyncio.Lock()
         self._reader_task: Optional[asyncio.Task] = None
         self._closed = False
@@ -232,6 +234,13 @@ class AcpBridge:
 
         asyncio.create_task(run())
 
+    async def interject(self, text: str, attachments: Optional[list[dict[str, Any]]] = None) -> None:
+        """Force-insert: cancel the running turn, then send now so the new
+        message is processed immediately instead of queued behind it."""
+        await self._ready.wait()
+        await self._notify("session/cancel", {"sessionId": self.session_id})
+        await self.prompt(text, attachments)
+
     async def respond_permission(
         self, request_id: str, option_id: Optional[str], cancelled: bool = False
     ) -> None:
@@ -350,6 +359,14 @@ class AcpBridge:
         elif method == "_x.ai/session/prompt_complete":
             if self._ready.is_set() and params.get("sessionId") in (None, self.session_id):
                 self._broadcast({"type": "turn_end", "stopReason": "end_turn"})
+        elif method == "_x.ai/queue/changed":
+            if params.get("sessionId") in (None, self.session_id):
+                self.queue = {
+                    "entries": params.get("entries", []),
+                    "runningPromptId": params.get("runningPromptId"),
+                }
+                if self._ready.is_set():
+                    self._broadcast({"type": "queue", **self.queue})
 
     async def _handle_server_request(
         self, req_id: Any, method: Optional[str], params: dict[str, Any]

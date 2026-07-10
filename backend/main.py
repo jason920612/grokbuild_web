@@ -11,11 +11,13 @@ Server -> browser:
         {"question", "options": [{"label", "description"}], "multiSelect"}]}
     {"type": "interaction_done", "requestId"}            answered/resolved (maybe elsewhere)
     {"type": "turn_end", "stopReason"}                   fires for web- AND terminal-driven turns
+    {"type": "queue", "entries": [{id, text}], "runningPromptId"}  prompts waiting behind the turn
     {"type": "error", "message"}
     {"type": "agent_exit"}
 Browser -> server:
     {"type": "ping"}                                     heartbeat (server replies {"type":"pong"})
-    {"type": "prompt", "text": "...", "attachments": [{path,name,mime,isImage}]?}
+    {"type": "prompt", "text": "...", "attachments": [...]?}       send (auto-queues while busy)
+    {"type": "interject", "text": "...", "attachments": [...]?}    force-insert: cancel turn + send now
     {"type": "permission_response", "requestId", "optionId"|null, "cancelled"?}
     {"type": "question_response", "requestId", "answers": {<question>: <label|[labels]>}, "skipped"?}
     {"type": "cancel"}
@@ -274,6 +276,9 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
     # Replay any unanswered question/permission popups to this late joiner.
     for msg in list(bridge.pending_interactions.values()):
         await ws.send_json(msg)
+    # And the current queue state (prompts waiting behind the running turn).
+    if bridge.queue.get("entries") or bridge.queue.get("runningPromptId"):
+        await ws.send_json({"type": "queue", **bridge.queue})
 
     async def pump_updates() -> None:
         while True:
@@ -292,6 +297,11 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
                 attachments = data.get("attachments") or []
                 if text or attachments:
                     await bridge.prompt(text, attachments)
+            elif kind == "interject":
+                text = (data.get("text") or "").strip()
+                attachments = data.get("attachments") or []
+                if text or attachments:
+                    await bridge.interject(text, attachments)
             elif kind == "permission_response":
                 await bridge.respond_permission(
                     data.get("requestId"),

@@ -39,7 +39,7 @@ const app = {
   thread: null,
   refs: { assistant: null, thought: null, tools: new Map(), plan: null },
   userSeg: null,
-  pendingEcho: null,
+  pendingEchoes: [],
   active: false,
 };
 
@@ -166,7 +166,7 @@ function openChat(id, title) {
   messages.appendChild(app.thread);
   app.refs = { assistant: null, thought: null, tools: new Map(), plan: null };
   app.userSeg = null;
-  app.pendingEcho = null;
+  app.pendingEchoes = [];
   setActive(false);
   show("chat");
   connect(id);
@@ -263,7 +263,7 @@ function resetThread() {
   app.thread.innerHTML = "";
   app.refs = { assistant: null, thought: null, tools: new Map(), plan: null };
   app.userSeg = null;
-  app.pendingEcho = null;
+  app.pendingEchoes = [];
   interactions.clear();
 }
 
@@ -295,6 +295,12 @@ function handle(msg) {
       app.refs.assistant = null;
       app.refs.thought = null;
       setActive(false);
+      break;
+    case "queue":
+      // safety net: when the queue fully drains, clear any lingering badges
+      if (!(msg.entries || []).length && !msg.runningPromptId) {
+        app.thread.querySelectorAll(".queued-badge").forEach((b) => b.remove());
+      }
       break;
     case "error":
       addNotice("⚠ " + msg.message, "err");
@@ -328,11 +334,18 @@ function onUpdate(u) {
       const text = textOf(u.content);
       if (!app.userSeg) {
         startNewTurn();
+        // Match this echoed message against our optimistically-shown sends.
+        // Using an array handles multiple queued messages echoing back in order.
         const t = text.trim();
-        const p = (app.pendingEcho || "").trim();
-        if (p && (p.startsWith(t) || t.startsWith(p) || t === p)) {
+        const echoes = app.pendingEchoes || [];
+        const idx = echoes.findIndex((e) => {
+          const p = (e.text || "").trim();
+          return p && (p.startsWith(t) || t.startsWith(p) || t === p);
+        });
+        if (idx >= 0) {
+          const e = echoes.splice(idx, 1)[0];
+          if (e.bubble) removeQueuedBadge(e.bubble); // it's running now, not queued
           app.userSeg = { echo: true };
-          app.pendingEcho = null;
         } else {
           app.userSeg = { echo: false, el: addUserBubble(""), raw: "" };
         }
@@ -693,16 +706,32 @@ function send(obj) {
 }
 function setActive(on) {
   app.active = on;
-  $("#send").classList.toggle("hidden", on);
   $("#stop").classList.toggle("hidden", !on);
+  $("#interject").classList.toggle("hidden", !on);
+  $("#send").title = on ? "排隊送出（等目前回合結束）" : "送出";
 }
-function sendPrompt() {
+function addQueuedBadge(bubble) {
+  if (!bubble.querySelector(".queued-badge")) {
+    bubble.querySelector(".bubble").appendChild(el("span", "queued-badge", "排隊中"));
+  }
+}
+function removeQueuedBadge(bubble) {
+  const b = bubble.querySelector(".queued-badge");
+  if (b) b.remove();
+}
+
+// kind: "prompt" (send; auto-queues while busy) | "interject" (cancel turn + send now)
+function dispatchPrompt(kind) {
   const input = $("#input");
   const text = input.value.trim();
   if (attachmentsBusy()) return; // wait for uploads to finish
   const { metas, previews } = takeAttachments();
   if (!text && !metas.length) return;
-  startNewTurn();
+
+  const queued = kind === "prompt" && app.active; // plain send while busy waits in the queue
+  // interject cancels the running turn; idle send starts fresh; queued send leaves refs alone
+  if (kind === "interject" || !app.active) startNewTurn();
+
   const bubble = addUserBubble(text || "（附件）");
   if (previews.length) {
     const wrap = el("div", "msg-att");
@@ -717,9 +746,11 @@ function sendPrompt() {
     }
     bubble.querySelector(".bubble").appendChild(wrap);
   }
-  // the agent echoes our text plus generated attachment notes; match on the prefix
-  app.pendingEcho = text || "[附加";
-  send({ type: "prompt", text, attachments: metas });
+  if (queued) addQueuedBadge(bubble);
+
+  // the agent echoes our text (plus attachment notes); match on the prefix
+  (app.pendingEchoes = app.pendingEchoes || []).push({ text: text || "[附加", bubble, queued });
+  send({ type: kind, text, attachments: metas });
   input.value = "";
   autoGrow();
   const sm = document.querySelector("#slash-menu");
@@ -727,6 +758,8 @@ function sendPrompt() {
   setActive(true);
   scrollToBottom(true);
 }
+function sendPrompt() { dispatchPrompt("prompt"); }
+function interjectPrompt() { dispatchPrompt("interject"); }
 function autoGrow() {
   const t = $("#input");
   t.style.height = "auto";
@@ -826,6 +859,7 @@ $("#nc-cwd").addEventListener("keydown", (e) => {
 });
 $("#back").onclick = backToPicker;
 $("#send").onclick = sendPrompt;
+$("#interject").onclick = interjectPrompt;
 $("#stop").onclick = () => send({ type: "cancel" });
 $("#input").addEventListener("input", autoGrow);
 $("#input").addEventListener("keydown", (e) => {

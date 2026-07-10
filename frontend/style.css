@@ -157,6 +157,11 @@ body { overflow: hidden; }
 .send { background: var(--accent); color: #0b0b0d; }
 .send:disabled { opacity: 0.4; cursor: default; }
 .stop { background: var(--err); color: #fff; }
+.interject { background: var(--warn); color: #0b0b0d; font-size: 18px; }
+.queued-badge {
+  display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 8px;
+  background: var(--bg-elev2); color: var(--warn); font-size: 11px; vertical-align: middle;
+}
 
 .typing { display: inline-block; width: 8px; height: 16px; background: var(--accent); animation: blink 1s steps(2) infinite; vertical-align: text-bottom; margin-left: 2px; }
 @keyframes blink { 50% { opacity: 0; } }
